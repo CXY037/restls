@@ -180,7 +180,7 @@ pub struct RestlsState<'a> {
     min_record_len: usize,
     parrot_tls12_gcm: bool,
     id: usize,
-    client_ip: Option<SocketAddr>,
+    client_ip: SocketAddr,
 }
 
 fn sample_slice(data: &[u8]) -> &[u8] {
@@ -556,7 +556,7 @@ impl<'a> RestlsState<'a> {
         } else {
             Err(anyhow!(
                 "reject: incorrect session id, Client ip: {:?}, expect: {:?}, actual {:?}",
-                self.client_ip,
+                self.client_ip.ip(),
                 expect,
                 actual
             ))
@@ -1002,7 +1002,7 @@ pub async fn handle(options: Arc<Opt>, inbound: TcpStream, id: usize) -> Result<
         min_record_len: options.min_record_len as usize,
         parrot_tls12_gcm: false,
         id,
-        client_ip: Option::from(client_addr), // 将客户端地址传入 RestlsState
+        client_ip: client_addr, // 将客户端地址传入 RestlsState
     };
     match try_handshake
         .try_handshake(&mut outbound, &mut inbound)
