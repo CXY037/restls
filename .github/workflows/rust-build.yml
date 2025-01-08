@@ -1,0 +1,47 @@
+name: Rust-Build
+
+on:
+  push:
+    tags:
+      - v*
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
+jobs:
+  build-cross:
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: full
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - armv7-unknown-linux-musleabihf
+          - arm-unknown-linux-musleabi
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          target: ${{ matrix.target }}
+          toolchain: nightly
+          default: true
+          override: true
+      - name: Install cross
+        run: cargo install cross
+      - name: Build ${{ matrix.target }}
+        timeout-minutes: 120
+        run: |
+          cross build --release --target ${{ matrix.target }} &&
+          mv target/${{ matrix.target }}/release/restls target/${{ matrix.target }}/release/restls-${{ matrix.target }}
+      - name: Upload Github Assets
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.gh_upload }}
+        with:
+          files: target/${{ matrix.target }}/release/restls-${{ matrix.target }}
+          prerelease: ${{ contains(github.ref, '-') }}
