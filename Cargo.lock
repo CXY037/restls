@@ -613,6 +613,7 @@ dependencies = [
  "clap 4.1.1",
  "futures-util",
  "hmac",
+ "lazy_static",
  "rand",
  "sha2",
  "structopt",

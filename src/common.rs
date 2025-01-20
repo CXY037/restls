@@ -60,3 +60,4 @@ pub fn curve_id_to_index(curve_id: usize) -> Result<usize> {
 }
 
 pub const TLS12_GCM_CIPHER_SUITES: &[u16] = &[0xc02f, 0xc02b, 0xc030, 0xc02c];
+

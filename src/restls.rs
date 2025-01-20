@@ -4,7 +4,7 @@ use futures_util::stream::StreamExt;
 use hmac::Mac;
 use rand::Rng;
 use std::{io::Cursor, sync::Arc};
-use std::net::SocketAddr;
+use std::net::{SocketAddr};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -12,6 +12,7 @@ use tokio::{
 };
 use tokio_util::codec::Decoder;
 use tracing::debug;
+mod config; // 声明模块
 
 use crate::{
     args::{Opt, Script},
@@ -181,6 +182,7 @@ pub struct RestlsState<'a> {
     parrot_tls12_gcm: bool,
     id: usize,
     client_ip: SocketAddr,
+    server_port: &'a String,
 }
 
 fn sample_slice(data: &[u8]) -> &[u8] {
@@ -401,7 +403,7 @@ impl<'a> RestlsState<'a> {
             .expect("unexpected error: record has been checked");
         let mut cursor = Cursor::new(&*record);
         self.client_hello = Some(
-            ClientHello::parse(&mut cursor, self.id).context("unable to parse client hello: ")?,
+            ClientHello::parse(&mut cursor, self.id, self.client_ip).context("unable to parse client hello: ")?,
         );
         Ok(())
     }
@@ -540,7 +542,7 @@ impl<'a> RestlsState<'a> {
         Ok(())
     }
 
-    fn check_tls13_session_id(&self) -> Result<()> {
+    async fn check_tls13_session_id(&mut self) -> Result<()> {
         let mut hasher = self.restls_hmac();
         let client_hello = self.client_hello.as_ref().unwrap();
         hasher.update(&client_hello.key_share);
@@ -551,12 +553,17 @@ impl<'a> RestlsState<'a> {
         let actual = &client_hello.session_id[..RESTLS_HANDSHAKE_HMAC_LEN];
         // we don't need constant time comparison since
         // that's not noticeable compared to network delay.
+        let ip_str = self.client_ip.ip();
         if expect == actual {
+            let mut logged_ips = config::LOGGED_IPS.lock().await; // 获取锁
+            if logged_ips.insert(ip_str) { // 如果 insert 返回 true，表示之前没有记录过
+                println!("Auth Success: Client ip: {:?}, Listen: {:?}", ip_str, self.server_port)
+            }
             Ok(())
         } else {
             Err(anyhow!(
                 "reject: incorrect session id, Client ip: {:?}, expect: {:?}, actual {:?}",
-                self.client_ip.ip(),
+                ip_str,
                 expect,
                 actual
             ))
@@ -964,7 +971,7 @@ impl<'a> RestlsState<'a> {
         self.relay_to(inbound, outbound).await?;
 
         if self.server_hello.as_ref().unwrap().is_tls13 {
-            self.check_tls13_session_id()?;
+            self.check_tls13_session_id().await?;
             self.try_read_tls13_till_first_0x17(outbound, inbound)
                 .await?;
             self.prepare_server_auth(outbound);
@@ -1003,6 +1010,7 @@ pub async fn handle(options: Arc<Opt>, inbound: TcpStream, id: usize) -> Result<
         parrot_tls12_gcm: false,
         id,
         client_ip: client_addr, // 将客户端地址传入 RestlsState
+        server_port: &options.listen,
     };
     match try_handshake
         .try_handshake(&mut outbound, &mut inbound)
@@ -1015,14 +1023,14 @@ pub async fn handle(options: Arc<Opt>, inbound: TcpStream, id: usize) -> Result<
                 .await
             {
                 Err(e) => {
-                    tracing::error!("restls data relay failed: {}", e);
+                    tracing::error!("restls data relay failed({}): {}", client_addr.ip(), e);
                     tcp_rst(inbound.get_mut()).await?
                 }
                 _ => (),
             }
         }
         Err(e) => {
-            tracing::error!("handshake failed: {:#}", e);
+            tracing::error!("handshake failed({}): {:#}", client_addr.ip(), e);
             copy_bidirectional_fallback(inbound, outbound).await?;
         }
     }

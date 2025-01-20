@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use bytes::{Buf, BufMut};
 use std::io::Cursor;
+use std::net::SocketAddr;
 use tracing::debug;
 
 use crate::{
@@ -78,7 +79,7 @@ impl ClientHello {
         Ok(key_share)
     }
 
-    pub(crate) fn parse(buf: &mut Cursor<&[u8]>, id: usize) -> Result<ClientHello> {
+    pub(crate) fn parse(buf: &mut Cursor<&[u8]>, id: usize, client_ip: SocketAddr) -> Result<ClientHello> {
         debug!(
             "[{}]parsing client hello: {} {:?}",
             id,
@@ -100,11 +101,12 @@ impl ClientHello {
         buf.advance(2); // version
         buf.copy_to_slice(&mut _client_random); // client random
 
+        let ip_str = client_ip.ip();
         let mut session_id = [0; 32];
         let session_id_len = read_length_padded::<1, _>(buf, &mut session_id)?; // session id
         debug!("session id: {:?}", session_id);
         if session_id_len != REQUIRED_SESSION_ID_LEN {
-            return Err(anyhow!("reject: session id should be exactly 32 bytes"));
+            return Err(anyhow!("reject: session id should be exactly 32 bytes, Client ip: {:?}", ip_str));
         }
 
         skip_length_padded::<2, _>(buf)?; // cipher suites
@@ -142,7 +144,7 @@ impl ClientHello {
         })?;
 
         if !client_supports_tls_13 {
-            return Err(anyhow!("reject: client must support tls 1.3"));
+            return Err(anyhow!("reject: client must support tls 1.3, Client ip: {:?}", ip_str));
         }
         Ok(ClientHello {
             _client_random,
